@@ -1,18 +1,47 @@
 {
   "name": "claude-context-bridge",
   "version": "1.0.0",
-  "description": "Local MCP server that exposes git repos and Claude Code session context to Claude.ai",
+  "description": "Local MCP server that gives Claude.ai live context about your git repos and Claude Code sessions",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "claude-context-bridge": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test-tools": "node dist/index.js --test",
-    "test-tools:dev": "tsx src/index.ts --test"
+    "test-tools:dev": "tsx src/index.ts --test",
+    "autostart": "bash scripts/install-autostart.sh"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "claude-code",
+    "git",
+    "developer-tools",
+    "anthropic",
+    "model-context-protocol",
+    "mcp-server"
+  ],
+  "author": "nirxnjxnCodeS",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nirxnjxnCodeS/Claude-to-Claude.git"
+  },
+  "homepage": "https://github.com/nirxnjxnCodeS/Claude-to-Claude#readme",
+  "bugs": {
+    "url": "https://github.com/nirxnjxnCodeS/Claude-to-Claude/issues"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
@@ -25,8 +54,5 @@
     "@types/node": "^20.11.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }

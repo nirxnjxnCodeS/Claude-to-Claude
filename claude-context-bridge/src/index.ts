@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { type RepoRef, createMCPServer } from './server.js';
 import { startStdioTransport } from './transport/stdio.js';
 import { startSSEServer } from './transport/sse.js';
+import { startAutoDetect } from './auto-detect.js';
 import { getProjectContext, getActiveChanges } from './tools/git.js';
 import { getRecentClaudeSessions } from './tools/sessions.js';
 import { getTodoContext, getBuildContext } from './tools/code.js';
@@ -10,6 +12,7 @@ interface CliOptions {
   repoPath?: string;
   port: number;
   noStdio: boolean;
+  auto: boolean;
   test: boolean;
 }
 
@@ -18,6 +21,7 @@ function parseArgs(): CliOptions {
   let repoPath: string | undefined;
   let port = 3451;
   let noStdio = false;
+  let auto = false;
   let test = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -27,11 +31,13 @@ function parseArgs(): CliOptions {
     } else if ((arg === '--port' || arg === '-p') && args[i + 1]) {
       port = parseInt(args[++i], 10);
       if (isNaN(port)) {
-        console.error('Invalid port number, using default 3451');
+        console.error('Invalid port, using default 3451');
         port = 3451;
       }
     } else if (arg === '--no-stdio') {
       noStdio = true;
+    } else if (arg === '--auto') {
+      auto = true;
     } else if (arg === '--test') {
       test = true;
     } else if (arg === '--help' || arg === '-h') {
@@ -40,7 +46,7 @@ function parseArgs(): CliOptions {
     }
   }
 
-  return { repoPath, port, noStdio, test };
+  return { repoPath, port, noStdio, auto, test };
 }
 
 function printHelp(): void {
@@ -51,7 +57,9 @@ USAGE
   claude-context-bridge [options]
 
 OPTIONS
-  --repo, -r <path>   Path to the git repository (default: cwd, walks up to find .git)
+  --repo, -r <path>   Explicit git repository path (default: cwd, walks up for .git)
+  --auto              Auto-detect active repo from most recent Claude Code session;
+                      re-checks every 30 s and switches if a newer session appears
   --port, -p <port>   SSE server port (default: 3451)
   --no-stdio          Disable stdio transport; run SSE-only
   --test              Run all tool functions and print output, then exit
@@ -64,7 +72,8 @@ TRANSPORTS
 EXAMPLES
   claude-context-bridge
   claude-context-bridge --repo /path/to/myproject
-  claude-context-bridge --port 3452 --no-stdio
+  claude-context-bridge --auto
+  claude-context-bridge --auto --port 3452 --no-stdio
   claude-context-bridge --test
 `);
 }
@@ -72,68 +81,58 @@ EXAMPLES
 async function runTests(repoPath?: string): Promise<void> {
   console.log('=== claude-context-bridge: Tool Function Tests ===\n');
 
-  console.log('--- get_project_context ---');
-  try {
-    const ctx = await getProjectContext(repoPath);
-    console.log(JSON.stringify(ctx, null, 2));
-  } catch (err) {
-    console.error('FAILED:', err);
-  }
-
-  console.log('\n--- get_active_changes ---');
-  try {
-    const changes = await getActiveChanges(repoPath);
-    console.log(JSON.stringify(changes, null, 2));
-  } catch (err) {
-    console.error('FAILED:', err);
-  }
-
-  console.log('\n--- get_recent_claude_sessions ---');
-  try {
-    const sessions = await getRecentClaudeSessions();
-    console.log(JSON.stringify(sessions, null, 2));
-  } catch (err) {
-    console.error('FAILED:', err);
-  }
-
-  console.log('\n--- get_todo_context ---');
-  try {
-    const todos = await getTodoContext(repoPath);
-    console.log(JSON.stringify(todos, null, 2));
-  } catch (err) {
-    console.error('FAILED:', err);
-  }
-
-  console.log('\n--- get_build_context ---');
-  try {
-    const build = await getBuildContext(repoPath);
-    console.log(JSON.stringify(build, null, 2));
-  } catch (err) {
-    console.error('FAILED:', err);
+  for (const [label, fn] of [
+    ['get_project_context', () => getProjectContext(repoPath)],
+    ['get_active_changes', () => getActiveChanges(repoPath)],
+    ['get_recent_claude_sessions', () => getRecentClaudeSessions()],
+    ['get_todo_context', () => getTodoContext(repoPath)],
+    ['get_build_context', () => getBuildContext(repoPath)],
+  ] as const) {
+    console.log(`\n--- ${label} ---`);
+    try {
+      console.log(JSON.stringify(await fn(), null, 2));
+    } catch (err) {
+      console.error('FAILED:', err);
+    }
   }
 
   console.log('\n=== All tools executed ===');
 }
 
 async function main(): Promise<void> {
-  const { repoPath, port, noStdio, test } = parseArgs();
+  const { repoPath, port, noStdio, auto, test } = parseArgs();
 
   if (test) {
     await runTests(repoPath);
     process.exit(0);
   }
 
-  // SSE server always starts (doesn't interfere with stdio)
-  startSSEServer(port, { repoPath });
+  // Build a mutable ref — tools read .path at call time so --auto switches
+  // are picked up on every invocation without restarting the server
+  const repoRef: RepoRef = {
+    path: auto ? undefined : repoPath,
+    mode: auto ? 'auto' : 'manual',
+  };
+
+  if (auto) {
+    startAutoDetect(repoRef); // sets repoRef.path every 30 s
+    console.error('[Bridge] Auto-detect mode: watching ~/.claude/projects/');
+  }
+
+  // Single factory — both transports share the same repoRef, so they always
+  // see the same current path regardless of which transport the client uses
+  const serverFactory = () => createMCPServer({ repoRef });
+
+  // SSE always starts (different I/O from stdio — no conflict)
+  startSSEServer(port, serverFactory);
 
   if (noStdio) {
-    console.error('[Bridge] Running in SSE-only mode (--no-stdio). Press Ctrl+C to stop.');
-    // Keep the process alive — the HTTP server does this, but be explicit
+    console.error('[Bridge] SSE-only mode (--no-stdio). Press Ctrl+C to stop.');
     process.stdin.resume();
   } else {
-    // stdio transport: reads from stdin, writes to stdout (MCP protocol)
-    // All logging above uses console.error (stderr) to avoid corrupting the protocol stream
-    await startStdioTransport({ repoPath });
+    // stdio reads MCP from stdin / writes to stdout.
+    // All logging above goes to stderr to avoid corrupting the protocol stream.
+    await startStdioTransport({ repoRef });
   }
 }
 
