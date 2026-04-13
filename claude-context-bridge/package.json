@@ -1,6 +1,6 @@
 {
   "name": "claude-context-bridge",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Local MCP server that gives Claude.ai live context about your git repos and Claude Code sessions",
   "type": "module",
   "main": "dist/index.js",
@@ -36,7 +36,7 @@
     "type": "git",
     "url": "git+https://github.com/nirxnjxnCodeS/Claude-to-Claude.git"
   },
-  "homepage": "https://github.com/nirxnjxnCodeS/Claude-to-Claude#readme",
+  "homepage": "https://github.com/nirxnjxnCodeS/Claude-to-Claude/tree/main/claude-context-bridge",
   "bugs": {
     "url": "https://github.com/nirxnjxnCodeS/Claude-to-Claude/issues"
   },
