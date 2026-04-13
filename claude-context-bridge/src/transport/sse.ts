@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import express from 'express';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 // Minimal Transport interface — matches the MCP SDK's structural requirement
 interface Transport {
@@ -56,6 +59,22 @@ interface Session {
 const sessions = new Map<string, Session>();
 
 export function startSSEServer(port: number, serverFactory: () => Server): void {
+  // Generate a per-process secret token and persist it so the extension can read it
+  const token = randomUUID();
+  const tokenPath = path.join(os.homedir(), '.claude-context-bridge-token');
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  console.log(`[Bridge] Auth token : ${token}`);
+  console.log(`[Bridge] Token file : ${tokenPath}`);
+
+  // Returns true when the request carries the correct token
+  function isAuthorized(req: Request): boolean {
+    const queryToken = req.query['token'] as string | undefined;
+    if (queryToken === token) return true;
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.replace(/^Bearer\s+/i, '').trim() === token) return true;
+    return false;
+  }
+
   const app = express();
   app.use(express.json());
 
@@ -74,7 +93,12 @@ export function startSSEServer(port: number, serverFactory: () => Server): void 
   // ── GET /sse ─────────────────────────────────────────────────────────────
   // Opens the long-lived SSE stream. Sends ONE `endpoint` event so the client
   // knows where to POST messages. All MCP responses travel back on this stream.
-  app.get('/sse', async (_req, res) => {
+  app.get('/sse', async (req, res) => {
+    if (!isAuthorized(req)) {
+      res.status(401).json({ error: 'Unauthorized — provide token as ?token= or Authorization: Bearer <token>' });
+      return;
+    }
+
     const sessionId = randomUUID();
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -120,6 +144,11 @@ export function startSSEServer(port: number, serverFactory: () => Server): void 
   // Client sends JSON-RPC requests here. Body is already parsed by express.json().
   // We inject it into the transport; the MCP Server responds via the SSE stream.
   app.post('/messages', (req, res) => {
+    if (!isAuthorized(req)) {
+      res.status(401).json({ error: 'Unauthorized — provide token as ?token= or Authorization: Bearer <token>' });
+      return;
+    }
+
     const sessionId = req.query['sessionId'] as string | undefined;
 
     if (!sessionId) {

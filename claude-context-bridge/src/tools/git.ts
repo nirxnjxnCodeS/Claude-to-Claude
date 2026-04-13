@@ -66,6 +66,48 @@ export async function getProjectContext(repoPath?: string): Promise<Record<strin
   };
 }
 
+function redactDiff(diff: string): string {
+  const lines = diff.split('\n');
+  let inEnvFile = false;
+  const result: string[] = [];
+
+  for (const line of lines) {
+    // Track file sections — skip .env files entirely
+    if (line.startsWith('diff --git ')) {
+      inEnvFile = /\.env(\b|$|\.)/.test(line);
+      if (inEnvFile) {
+        result.push('diff --git [.env file — redacted]');
+      } else {
+        result.push(line);
+      }
+      continue;
+    }
+
+    if (inEnvFile) continue; // skip all .env diff content
+
+    // Redact sensitive values in added/removed content lines
+    if (line.startsWith('+') || line.startsWith('-')) {
+      let redacted = line;
+      // key=value style (password, secret, api_key, token)
+      redacted = redacted.replace(
+        /(\b(?:password|secret|api[_-]?key|token)\s*[:=]\s*)(\S+)/gi,
+        '$1[REDACTED]'
+      );
+      // Bearer <token>
+      redacted = redacted.replace(/(Bearer\s+)(\S+)/gi, '$1[REDACTED]');
+      // sk-... / pk-... style API keys
+      redacted = redacted.replace(/\b(sk|pk)-[A-Za-z0-9_-]{10,}/g, '[REDACTED]');
+      // PEM private key headers
+      redacted = redacted.replace(/-----BEGIN [A-Z ]* PRIVATE KEY-----/gi, '[REDACTED PRIVATE KEY]');
+      result.push(redacted);
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
+}
+
 export async function getActiveChanges(repoPath?: string): Promise<Record<string, unknown>> {
   const startPath = repoPath ?? process.cwd();
   const gitRoot = await findGitRoot(startPath);
@@ -83,7 +125,7 @@ export async function getActiveChanges(repoPath?: string): Promise<Record<string
   ]);
 
   const combined = [stagedDiff, unstagedDiff].filter(Boolean).join('\n');
-  const diff =
+  const rawDiff =
     combined.length > 3000
       ? combined.substring(0, 3000) + '\n\n... (truncated — showing first 3000 chars)'
       : combined;
@@ -92,6 +134,6 @@ export async function getActiveChanges(repoPath?: string): Promise<Record<string
     modified_files: statusResult?.modified ?? [],
     staged_files: statusResult?.staged ?? [],
     untracked_files: statusResult?.not_added ?? [],
-    diff: diff || '(no changes)',
+    diff: rawDiff ? redactDiff(rawDiff) : '(no changes)',
   };
 }

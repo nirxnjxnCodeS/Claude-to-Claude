@@ -16,6 +16,15 @@ interface SessionInfo {
   first_prompt: string;
 }
 
+function redactSensitive(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(/password\s*=\s*\S+/gi, 'password=[REDACTED]')
+    .replace(/API_KEY\s*=\s*\S+/gi, 'API_KEY=[REDACTED]')
+    .replace(/token\s*=\s*\S+/gi, 'token=[REDACTED]');
+}
+
 function extractFirstPrompt(filePath: string): string {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.trim().split('\n').filter(Boolean);
@@ -35,7 +44,7 @@ function extractFirstPrompt(filePath: string): string {
           text = msgContent;
         }
         if (text.trim()) {
-          return text.substring(0, 200);
+          return redactSensitive(text.substring(0, 200));
         }
       }
     } catch { /* skip malformed JSON lines */ }
