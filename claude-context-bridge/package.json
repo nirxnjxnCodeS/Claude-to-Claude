@@ -1,6 +1,6 @@
 {
   "name": "claude-context-bridge",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "description": "Local MCP server that gives Claude.ai live context about your git repos and Claude Code sessions",
   "type": "module",
   "main": "dist/index.js",
