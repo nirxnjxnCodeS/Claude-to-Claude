@@ -6,6 +6,7 @@ import {
 import { getProjectContext, getActiveChanges } from './tools/git.js';
 import { getRecentClaudeSessions } from './tools/sessions.js';
 import { getTodoContext, getBuildContext } from './tools/code.js';
+import { getSessionSummary } from './tools/session-summary.js';
 
 /** Mutable reference to the active repo path — updated live in --auto mode. */
 export interface RepoRef {
@@ -54,6 +55,12 @@ const TOOLS = [
       'Returns the currently active repository path and how it was detected (auto-detected from Claude Code sessions, or set manually via --repo flag).',
     inputSchema: { type: 'object' as const, properties: {}, required: [] },
   },
+  {
+    name: 'get_session_summary',
+    description:
+      'Parse the most recent Claude Code session file and return a structured summary: total turns, all user messages, all tool calls made, file paths touched, and the last assistant message.',
+    inputSchema: { type: 'object' as const, properties: {}, required: [] },
+  },
 ] as const;
 
 type ToolName = (typeof TOOLS)[number]['name'];
@@ -89,6 +96,9 @@ export function createMCPServer(options: BridgeOptions): Server {
           break;
         case 'get_build_context':
           result = await getBuildContext(repoPath);
+          break;
+        case 'get_session_summary':
+          result = await getSessionSummary();
           break;
         case 'get_current_repo':
           result = {
